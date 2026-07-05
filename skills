@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_EXT=".skill"
+
+detect_targets() {
+  local targets=()
+  if [[ -d "$HOME/.config/opencode/skills" ]]; then
+    targets+=("opencode:$HOME/.config/opencode/skills")
+  fi
+  if [[ -d "$HOME/.claude/skills" ]]; then
+    targets+=("claude:$HOME/.claude/skills")
+  fi
+  if [[ -d "$HOME/.cursor/agent-skills" ]]; then
+    targets+=("cursor:$HOME/.cursor/agent-skills")
+  fi
+  if [[ ${#targets[@]} -eq 0 ]]; then
+    targets+=("global:$SELF_DIR")
+  fi
+  printf '%s\n' "${targets[@]}"
+}
+
+list_skills() {
+  local dir="${1:-$SELF_DIR}"
+  for f in "$dir"/*"$SKILL_EXT"; do
+    [[ -f "$f" ]] || continue
+    local name
+    name=$(basename "$f" "$SKILL_EXT")
+    local desc
+    desc=$(unzip -p "$f" "${name}/SKILL.md" 2>/dev/null | sed -n 's/^description: //p' | head -1)
+    printf "  %-28s %s\n" "$name" "${desc:-}"
+  done
+}
+
+cmd_list() {
+  echo "Available skills:"
+  list_skills "$SELF_DIR"
+}
+
+cmd_status() {
+  echo "Repository:"
+  printf "  %-28s %s (%d skills)\n" "$SELF_DIR" "local" "$(find "$SELF_DIR" -maxdepth 1 -name "*$SKILL_EXT" | wc -l | tr -d ' ')"
+  echo
+  echo "Installed targets:"
+  local found=0
+  while IFS=':' read -r name path; do
+    local count
+    count=$(find "$path" -maxdepth 1 -name "*$SKILL_EXT" 2>/dev/null | wc -l | tr -d ' ')
+    printf "  %-28s %s (%d skills)\n" "$name" "$path" "$count"
+    found=1
+  done < <(detect_targets)
+  [[ $found -eq 0 ]] && echo "  (none detected)"
+}
+
+cmd_install() {
+  local selected=()
+  local target_dir=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target|-t)
+        target_dir="$2"
+        shift 2
+        ;;
+      all)
+        for f in "$SELF_DIR"/*"$SKILL_EXT"; do
+          [[ -f "$f" ]] && selected+=("$(basename "$f" "$SKILL_EXT")")
+        done
+        shift
+        ;;
+      *)
+        selected+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ ${#selected[@]} -eq 0 ]]; then
+    echo "Usage: skills install <skill-name|all> [--target path]"
+    echo
+    echo "Available skills:"
+    list_skills "$SELF_DIR"
+    exit 1
+  fi
+
+  if [[ -z "$target_dir" ]]; then
+    while IFS=':' read -r name path; do
+      target_dir="$path"
+      break
+    done < <(detect_targets)
+    echo "Auto-detected target: $target_dir"
+  fi
+
+  mkdir -p "$target_dir"
+
+  for skill_name in "${selected[@]}"; do
+    local src="$SELF_DIR/${skill_name}$SKILL_EXT"
+    if [[ ! -f "$src" ]]; then
+      echo "  [SKIP]  $skill_name (not found)"
+      continue
+    fi
+    cp "$src" "$target_dir/"
+    echo "  [OK]    $skill_name -> $target_dir/"
+  done
+
+  local count=${#selected[@]}
+  echo "Installed $count skill(s) to $target_dir"
+}
+
+cmd_uninstall() {
+  local selected=()
+  local target_dir=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target|-t)
+        target_dir="$2"
+        shift 2
+        ;;
+      all)
+        for f in "$SELF_DIR"/*"$SKILL_EXT"; do
+          [[ -f "$f" ]] && selected+=("$(basename "$f" "$SKILL_EXT")")
+        done
+        shift
+        ;;
+      *)
+        selected+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ ${#selected[@]} -eq 0 ]]; then
+    echo "Usage: skills uninstall <skill-name|all> [--target path]"
+    exit 1
+  fi
+
+  if [[ -z "$target_dir" ]]; then
+    while IFS=':' read -r name path; do
+      target_dir="$path"
+      break
+    done < <(detect_targets)
+    echo "Auto-detected target: $target_dir"
+  fi
+
+  for skill_name in "${selected[@]}"; do
+    local target="$target_dir/${skill_name}$SKILL_EXT"
+    if [[ ! -f "$target" ]]; then
+      echo "  [SKIP]  $skill_name (not installed at $target_dir)"
+      continue
+    fi
+    rm "$target"
+    echo "  [OK]    $skill_name removed from $target_dir/"
+  done
+}
+
+cmd_help() {
+  cat <<EOF
+Usage: skills <command> [options]
+
+Commands:
+  list                   List all available skills
+  status                 Show install targets and counts
+  install <name|all>     Install skill(s) to target
+    --target, -t <path>   Custom install directory
+  uninstall <name|all>   Remove skill(s) from target
+    --target, -t <path>   Custom target directory
+
+Examples:
+  skills list
+  skills status
+  skills install all
+  skills install project-scope-guard flutter-perf-guardian
+  skills install all --target ~/.config/opencode/skills
+  skills uninstall flutter-anti-tamper
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift 2>/dev/null || true
+
+  case "$cmd" in
+    list)    cmd_list "$@" ;;
+    status)  cmd_status "$@" ;;
+    install) cmd_install "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
+    help|--help|-h) cmd_help ;;
+    *)
+      echo "Unknown command: $cmd"
+      cmd_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
