@@ -1,8 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="workspaccode/skills-Epic"
+BRANCH="${SKILLS_BRANCH:-main}"
+RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 SKILL_EXT=".skill"
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_NAME="$(basename "${BASH_SOURCE[0]}")"
+
+# -- mode detection -----------------------------------------------------------
+# We operate in one of two modes:
+#   local   – .skill files are beside the script (clone/checkout)
+#   remote  – .skill files are downloaded from GitHub (PATH install)
+
+has_local_skills() {
+  ls "$SELF_DIR"/*"$SKILL_EXT" &>/dev/null
+}
+
+fetch_skill() {
+  local name="$1"
+  local out_dir="$2"
+  local url="$RAW_BASE/${name}${SKILL_EXT}"
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$url" -o "$out_dir/${name}${SKILL_EXT}" 2>/dev/null
+  elif command -v wget &>/dev/null; then
+    wget -q "$url" -O "$out_dir/${name}${SKILL_EXT}" 2>/dev/null
+  else
+    return 1
+  fi
+}
+
+list_remote_skills() {
+  # Known skills list
+  local skills=(
+    "flutter-anti-tamper:Hardens Flutter apps against reverse engineering and runtime tampering"
+    "flutter-arch-selector:Prompts to choose MVVM/MVC/Clean Architecture before writing code"
+    "flutter-perf-guardian:Reviews Flutter/Dart code for performance anti-patterns"
+    "flutter-security-guardian:Scans for hardcoded secrets and security issues"
+    "flutter-uix-architect:Scaffolds responsive clean-code Flutter UI with DI and state management"
+    "gh-actions-guardian:Sets up GitHub Actions workflows for Flutter/Dart CI/CD"
+    "gradle-doctor:Diagnoses and fixes Gradle/Android build errors"
+    "ios-build-doctor:Diagnoses and fixes iOS/Xcode build errors"
+    "project-scope-guard:Keeps work anchored to the project's actual goal"
+  )
+  for entry in "${skills[@]}"; do
+    local name="${entry%%:*}"
+    local desc="${entry#*:}"
+    printf "  %-28s %s\n" "$name" "$desc"
+  done
+}
+
+# -- targets ------------------------------------------------------------------
 
 detect_targets() {
   local targets=()
@@ -16,37 +65,47 @@ detect_targets() {
     targets+=("cursor:$HOME/.cursor/agent-skills")
   fi
   if [[ ${#targets[@]} -eq 0 ]]; then
-    targets+=("global:$SELF_DIR")
+    if has_local_skills; then
+      targets+=("local:$SELF_DIR")
+    else
+      targets+=("opencode:$HOME/.config/opencode/skills")
+    fi
   fi
   printf '%s\n' "${targets[@]}"
 }
 
-list_skills() {
-  local dir="${1:-$SELF_DIR}"
-  for f in "$dir"/*"$SKILL_EXT"; do
-    [[ -f "$f" ]] || continue
-    local name
-    name=$(basename "$f" "$SKILL_EXT")
-    local desc
-    desc=$(unzip -p "$f" "${name}/SKILL.md" 2>/dev/null | sed -n 's/^description: //p' | head -1)
-    printf "  %-28s %s\n" "$name" "${desc:-}"
-  done
-}
+# -- commands -----------------------------------------------------------------
 
 cmd_list() {
   echo "Available skills:"
-  list_skills "$SELF_DIR"
+  if has_local_skills; then
+    for f in "$SELF_DIR"/*"$SKILL_EXT"; do
+      [[ -f "$f" ]] || continue
+      local name
+      name=$(basename "$f" "$SKILL_EXT")
+      local desc
+      desc=$(unzip -p "$f" "${name}/SKILL.md" 2>/dev/null | sed -n 's/^description: //p' | head -1)
+      printf "  %-28s %s\n" "$name" "${desc:-}"
+    done
+  else
+    list_remote_skills
+  fi
 }
 
 cmd_status() {
-  echo "Repository:"
-  printf "  %-28s %s (%d skills)\n" "$SELF_DIR" "local" "$(find "$SELF_DIR" -maxdepth 1 -name "*$SKILL_EXT" | wc -l | tr -d ' ')"
-  echo
+  if has_local_skills; then
+    echo "Repository:"
+    printf "  %-28s %s (%d skills)\n" "$SELF_DIR" "local" "$(find "$SELF_DIR" -maxdepth 1 -name "*$SKILL_EXT" | wc -l | tr -d ' ')"
+    echo
+  fi
+
   echo "Installed targets:"
   local found=0
   while IFS=':' read -r name path; do
-    local count
-    count=$(find "$path" -maxdepth 1 -name "*$SKILL_EXT" 2>/dev/null | wc -l | tr -d ' ')
+    local count=0
+    if [[ -d "$path" ]]; then
+      count=$(find "$path" -maxdepth 1 -name "*$SKILL_EXT" 2>/dev/null | wc -l | tr -d ' ')
+    fi
     printf "  %-28s %s (%d skills)\n" "$name" "$path" "$count"
     found=1
   done < <(detect_targets)
@@ -64,9 +123,23 @@ cmd_install() {
         shift 2
         ;;
       all)
-        for f in "$SELF_DIR"/*"$SKILL_EXT"; do
-          [[ -f "$f" ]] && selected+=("$(basename "$f" "$SKILL_EXT")")
-        done
+        if has_local_skills; then
+          for f in "$SELF_DIR"/*"$SKILL_EXT"; do
+            [[ -f "$f" ]] && selected+=("$(basename "$f" "$SKILL_EXT")")
+          done
+        else
+          selected+=( \
+            flutter-anti-tamper \
+            flutter-arch-selector \
+            flutter-perf-guardian \
+            flutter-security-guardian \
+            flutter-uix-architect \
+            gh-actions-guardian \
+            gradle-doctor \
+            ios-build-doctor \
+            project-scope-guard \
+          )
+        fi
         shift
         ;;
       *)
@@ -77,15 +150,14 @@ cmd_install() {
   done
 
   if [[ ${#selected[@]} -eq 0 ]]; then
-    echo "Usage: skills install <skill-name|all> [--target path]"
+    echo "Usage: $SELF_NAME install <skill-name|all> [--target path]"
     echo
-    echo "Available skills:"
-    list_skills "$SELF_DIR"
+    cmd_list
     exit 1
   fi
 
   if [[ -z "$target_dir" ]]; then
-    while IFS=':' read -r name path; do
+    while IFS=':' read -r _ path; do
       target_dir="$path"
       break
     done < <(detect_targets)
@@ -94,17 +166,21 @@ cmd_install() {
 
   mkdir -p "$target_dir"
 
+  local count=0
   for skill_name in "${selected[@]}"; do
     local src="$SELF_DIR/${skill_name}$SKILL_EXT"
-    if [[ ! -f "$src" ]]; then
-      echo "  [SKIP]  $skill_name (not found)"
-      continue
+    if [[ -f "$src" ]]; then
+      cp "$src" "$target_dir/"
+      printf "  [OK]    %s (local)\n" "$skill_name"
+      count=$((count + 1))
+    elif fetch_skill "$skill_name" "$target_dir"; then
+      printf "  [OK]    %s (remote)\n" "$skill_name"
+      count=$((count + 1))
+    else
+      printf "  [FAIL]  %s\n" "$skill_name"
     fi
-    cp "$src" "$target_dir/"
-    echo "  [OK]    $skill_name -> $target_dir/"
   done
 
-  local count=${#selected[@]}
   echo "Installed $count skill(s) to $target_dir"
 }
 
@@ -119,9 +195,13 @@ cmd_uninstall() {
         shift 2
         ;;
       all)
-        for f in "$SELF_DIR"/*"$SKILL_EXT"; do
-          [[ -f "$f" ]] && selected+=("$(basename "$f" "$SKILL_EXT")")
-        done
+        local found=false
+        while IFS=':' read -r _ path; do
+          for f in "$path"/*"$SKILL_EXT"; do
+            [[ -f "$f" ]] && selected+=("$(basename "$f" "$SKILL_EXT")")
+          done
+          found=true
+        done < <(detect_targets)
         shift
         ;;
       *)
@@ -132,12 +212,12 @@ cmd_uninstall() {
   done
 
   if [[ ${#selected[@]} -eq 0 ]]; then
-    echo "Usage: skills uninstall <skill-name|all> [--target path]"
+    echo "Usage: $SELF_NAME uninstall <skill-name|all> [--target path]"
     exit 1
   fi
 
   if [[ -z "$target_dir" ]]; then
-    while IFS=':' read -r name path; do
+    while IFS=':' read -r _ path; do
       target_dir="$path"
       break
     done < <(detect_targets)
@@ -147,33 +227,82 @@ cmd_uninstall() {
   for skill_name in "${selected[@]}"; do
     local target="$target_dir/${skill_name}$SKILL_EXT"
     if [[ ! -f "$target" ]]; then
-      echo "  [SKIP]  $skill_name (not installed at $target_dir)"
+      echo "  [SKIP]  $skill_name (not installed)"
       continue
     fi
     rm "$target"
-    echo "  [OK]    $skill_name removed from $target_dir/"
+    echo "  [OK]    $skill_name removed"
   done
+}
+
+cmd_update() {
+  local target_dir=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target|-t)
+        target_dir="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$target_dir" ]]; then
+    while IFS=':' read -r _ path; do
+      target_dir="$path"
+      break
+    done < <(detect_targets)
+  fi
+
+  echo "Updating all skills in $target_dir ..."
+
+  local skills=(
+    flutter-anti-tamper
+    flutter-arch-selector
+    flutter-perf-guardian
+    flutter-security-guardian
+    flutter-uix-architect
+    gh-actions-guardian
+    gradle-doctor
+    ios-build-doctor
+    project-scope-guard
+  )
+
+  local count=0
+  for skill in "${skills[@]}"; do
+    if fetch_skill "$skill" "$target_dir"; then
+      printf "  [OK]    %s\n" "$skill"
+      count=$((count + 1))
+    else
+      printf "  [FAIL]  %s\n" "$skill"
+    fi
+  done
+
+  echo "Updated $count skill(s)"
 }
 
 cmd_help() {
   cat <<EOF
-Usage: skills <command> [options]
+Usage: $SELF_NAME <command> [options]
 
 Commands:
-  list                   List all available skills
-  status                 Show install targets and counts
-  install <name|all>     Install skill(s) to target
-    --target, -t <path>   Custom install directory
-  uninstall <name|all>   Remove skill(s) from target
-    --target, -t <path>   Custom target directory
+  list                              List all available skills
+  status                            Show install targets and counts
+  install <name|all> [--target <path>]
+  uninstall <name|all> [--target <path>]
+  update [--target <path>]          Download latest skills from GitHub
+  help                              Show this help
 
 Examples:
-  skills list
-  skills status
-  skills install all
-  skills install project-scope-guard flutter-perf-guardian
-  skills install all --target ~/.config/opencode/skills
-  skills uninstall flutter-anti-tamper
+  $SELF_NAME list
+  $SELF_NAME status
+  $SELF_NAME install all
+  $SELF_NAME install project-scope-guard
+  $SELF_NAME install all --target ~/.claude/skills
+  $SELF_NAME update
 EOF
 }
 
@@ -182,10 +311,11 @@ main() {
   shift 2>/dev/null || true
 
   case "$cmd" in
-    list)    cmd_list "$@" ;;
-    status)  cmd_status "$@" ;;
-    install) cmd_install "$@" ;;
+    list)      cmd_list "$@" ;;
+    status)    cmd_status "$@" ;;
+    install)   cmd_install "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
+    update)    cmd_update "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
       echo "Unknown command: $cmd"
