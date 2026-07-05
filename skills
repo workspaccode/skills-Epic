@@ -36,6 +36,7 @@ list_remote_skills() {
   local skills=(
     "flutter-anti-tamper:Hardens Flutter apps against reverse engineering and runtime tampering"
     "flutter-arch-selector:Prompts to choose MVVM/MVC/Clean Architecture before writing code"
+    "flutter-code:Flutter reliability skill — state loss, widget rebuilds, async pitfalls, navigation, performance"
     "flutter-perf-guardian:Reviews Flutter/Dart code for performance anti-patterns"
     "flutter-security-guardian:Scans for hardcoded secrets and security issues"
     "flutter-uix-architect:Scaffolds responsive clean-code Flutter UI with DI and state management"
@@ -131,6 +132,7 @@ cmd_install() {
           selected+=( \
             flutter-anti-tamper \
             flutter-arch-selector \
+            flutter-code \
             flutter-perf-guardian \
             flutter-security-guardian \
             flutter-uix-architect \
@@ -262,6 +264,7 @@ cmd_update() {
   local skills=(
     flutter-anti-tamper
     flutter-arch-selector
+    flutter-code
     flutter-perf-guardian
     flutter-security-guardian
     flutter-uix-architect

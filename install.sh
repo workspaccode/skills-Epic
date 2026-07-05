@@ -40,6 +40,7 @@ install_skills() {
   local skills=(
     flutter-anti-tamper
     flutter-arch-selector
+    flutter-code
     flutter-perf-guardian
     flutter-security-guardian
     flutter-uix-architect

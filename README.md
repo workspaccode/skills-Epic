@@ -35,6 +35,7 @@ skills update     # download latest versions
 | **project-scope-guard** | Keeps work anchored to the project's actual goal — prevents drift into unrelated features or tangents |
 | **flutter-anti-tamper** | Hardens Flutter apps against reverse engineering, decompilation, and runtime tampering |
 | **flutter-arch-selector** | Prompts to choose MVVM, MVC, or Clean Architecture before writing structural code |
+| **flutter-code** | Flutter reliability skill — state loss, widget rebuild traps, async pitfalls, navigation, performance, platform channels |
 | **flutter-perf-guardian** | Reviews Flutter/Dart code for performance mistakes and anti-patterns |
 | **flutter-security-guardian** | Scans for hardcoded secrets, insecure storage, missing cert pinning |
 | **flutter-uix-architect** | Scaffolds responsive clean-code Flutter UI with DI and state management |
